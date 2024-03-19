@@ -181,6 +181,11 @@ func printHelp() {
 }
 
 func main() {
+	if len(os.Args) < 1 {
+		printHelp()
+		os.Exit(0)
+	}
+
 	if len(os.Args) < 4 {
 		fmt.Print("Invalid amount of input args\n\n")
 
