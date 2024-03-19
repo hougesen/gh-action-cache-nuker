@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -29,7 +29,6 @@ func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error)
 	url := fmt.Sprintf("https://api.github.com/repos/%s/actions/caches?per_page=100&sort=created_at&direction=asc", repo)
 
 	req, err := http.NewRequest("GET", url, nil)
-
 	if err != nil {
 		return []ActionsCache{}, err
 	}
@@ -37,16 +36,13 @@ func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error)
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 
 	res, err := http.DefaultClient.Do(req)
-	
-
-    if err != nil {
+	if err != nil {
 		return []ActionsCache{}, err
 	}
 
 	defer res.Body.Close()
 
 	bodyBytes, err := io.ReadAll(res.Body)
-
 	if err != nil {
 		return []ActionsCache{}, err
 	}
@@ -61,10 +57,9 @@ func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error)
 }
 
 func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/actions/caches?key=%s", repo, key)
+	u := fmt.Sprintf("https://api.github.com/repos/%s/actions/caches?key=%s", repo, url.QueryEscape(key))
 
-	req, err := http.NewRequest("DELETE", url, nil)
-
+	req, err := http.NewRequest("DELETE", u, nil)
 	if err != nil {
 		return false, err
 	}
@@ -72,8 +67,6 @@ func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 
 	res, err := http.DefaultClient.Do(req)
-
-
 	if err != nil {
 		return false, err
 	}
@@ -81,35 +74,27 @@ func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, 
 	defer res.Body.Close()
 
 	return res.StatusCode == 200, nil
-
 }
 
 func deleteRepoCaches(token string, repo string) (uint, error) {
 	var deletedCaches uint = 0
 
-	for {
-		actionCaches, err := externalGetRepoCacheList(token, repo)
+	actionCaches, err := externalGetRepoCacheList(token, repo)
+	if err != nil {
+		return deletedCaches, err
+	}
 
-		if err != nil {
-			return deletedCaches, err
+	for _, cache := range actionCaches {
+		deleteResult, deleteError := externalDeleteRepoCacheByKey(token, repo, cache.Key)
+
+		if deleteError != nil {
+			return deletedCaches, deleteError
 		}
 
-		if len(actionCaches) == 0 {
-			break
+		if deleteResult {
+			deletedCaches += 1
 		}
 
-		for _, cache := range actionCaches {
-			deleteResult, deleteError := externalDeleteRepoCacheByKey(token, repo, cache.Key)
-
-			if deleteError != nil {
-				return deletedCaches, deleteError
-			}
-
-			if deleteResult {
-				deletedCaches += 1
-			}
-
-		}
 	}
 
 	return deletedCaches, nil
@@ -137,7 +122,6 @@ func externalGetUsageByRepository(token string, owner string) ([]string, error) 
 		url := fmt.Sprintf("https://api.github.com/orgs/%s/actions/cache/usage-by-repository?per_page=100&page=%d", owner, page)
 
 		req, err := http.NewRequest("GET", url, nil)
-
 		if err != nil {
 			return repoNames, err
 		}
@@ -145,7 +129,6 @@ func externalGetUsageByRepository(token string, owner string) ([]string, error) 
 		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 
 		res, err := http.DefaultClient.Do(req)
-
 		if err != nil {
 			return repoNames, err
 		}
@@ -153,7 +136,6 @@ func externalGetUsageByRepository(token string, owner string) ([]string, error) 
 		defer res.Body.Close()
 
 		bodyBytes, err := io.ReadAll(res.Body)
-
 		if err != nil {
 			return repoNames, err
 		}
@@ -178,10 +160,17 @@ func externalGetUsageByRepository(token string, owner string) ([]string, error) 
 	return repoNames, nil
 }
 
+func printHelp() {
+	fmt.Println("Usage: <repo | org> <OWNER/NAME> <GITHUB_TOKEN>")
+}
+
 func main() {
-	if len(os.Args) != 4 {
-		log.Fatal("Invalid amount of input args")
-		return
+	if len(os.Args) < 4 {
+		fmt.Print("Invalid amount of input args\n\n")
+
+		printHelp()
+
+		os.Exit(1)
 	}
 
 	repoNames := []string{}
@@ -197,35 +186,34 @@ func main() {
 
 	case "org":
 		r, err := externalGetUsageByRepository(token, resource)
-
 		if err != nil {
-			log.Fatal(err)
-			return
+			fmt.Print("Error getting cache usage\n\n")
+			fmt.Print(err)
+			os.Exit(1)
 		}
 
 		if len(r) == 0 {
-			fmt.Println(resource, "has no action caches")
+			fmt.Printf("'%s' has no action caches\n", resource)
 		}
 
 		repoNames = r
 
 	default:
-		log.Fatal("Received unknown action input:", action)
-		return
+		fmt.Printf("Received unknown action input: '%s'\n\n", action)
+		printHelp()
+		os.Exit(1)
 	}
 
 	for _, repo := range repoNames {
+		fmt.Printf(repo)
 
 		keys, err := deleteRepoCaches(token, repo)
-
 		if err != nil {
-			log.Fatal(err)
-			return
+			fmt.Println("Error deleting cache")
+			fmt.Print(err)
+			os.Exit(1)
 		}
 
-		if keys == 0 {
-			break
-		}
-
+		fmt.Printf(": removed %d caches\n", keys)
 	}
 }
