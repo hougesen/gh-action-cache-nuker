@@ -23,7 +23,11 @@ type ActionsCache struct {
 	SizeInBytes    int    `json:"size_in_bytes"`
 }
 
-func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error) {
+func warnInvalidToken(statusCode int) {
+	fmt.Printf("[WARN] Just received a %d from GitHub - is the token valid?\n", statusCode)
+}
+
+func getRepoCacheList(token string, repo string) ([]ActionsCache, error) {
 	var actionCaches GithubRepoCacheResponse
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/actions/caches?per_page=100&sort=created_at&direction=asc", repo)
@@ -38,6 +42,10 @@ func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return []ActionsCache{}, err
+	}
+
+	if res.StatusCode == 401 || res.StatusCode == 403 {
+		warnInvalidToken(res.StatusCode)
 	}
 
 	defer res.Body.Close()
@@ -56,7 +64,7 @@ func externalGetRepoCacheList(token string, repo string) ([]ActionsCache, error)
 	return actionCaches.ActionsCaches, nil
 }
 
-func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, error) {
+func deleteRepoCacheByKey(token string, repo string, key string) (bool, error) {
 	u := fmt.Sprintf("https://api.github.com/repos/%s/actions/caches?key=%s", repo, url.QueryEscape(key))
 
 	req, err := http.NewRequest("DELETE", u, nil)
@@ -71,6 +79,10 @@ func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, 
 		return false, err
 	}
 
+	if res.StatusCode == 401 || res.StatusCode == 403 {
+		warnInvalidToken(res.StatusCode)
+	}
+
 	defer res.Body.Close()
 
 	return res.StatusCode == 200, nil
@@ -79,13 +91,13 @@ func externalDeleteRepoCacheByKey(token string, repo string, key string) (bool, 
 func deleteRepoCaches(token string, repo string) (uint, error) {
 	var deletedCaches uint = 0
 
-	actionCaches, err := externalGetRepoCacheList(token, repo)
+	actionCaches, err := getRepoCacheList(token, repo)
 	if err != nil {
 		return deletedCaches, err
 	}
 
 	for _, cache := range actionCaches {
-		deleteResult, deleteError := externalDeleteRepoCacheByKey(token, repo, cache.Key)
+		deleteResult, deleteError := deleteRepoCacheByKey(token, repo, cache.Key)
 
 		if deleteError != nil {
 			return deletedCaches, deleteError
@@ -111,7 +123,7 @@ type RepositoryCacheUsage struct {
 	ActiveCachesCount       int    `json:"active_caches_count"`
 }
 
-func externalGetUsageByRepository(token string, owner string) ([]string, error) {
+func getUsageByRepository(token string, owner string) ([]string, error) {
 	repoNames := []string{}
 
 	page := 1
@@ -131,6 +143,10 @@ func externalGetUsageByRepository(token string, owner string) ([]string, error) 
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return repoNames, err
+		}
+
+		if res.StatusCode == 401 || res.StatusCode == 403 {
+			warnInvalidToken(res.StatusCode)
 		}
 
 		defer res.Body.Close()
@@ -185,7 +201,7 @@ func main() {
 		repoNames = append(repoNames, resource)
 
 	case "org":
-		r, err := externalGetUsageByRepository(token, resource)
+		r, err := getUsageByRepository(token, resource)
 		if err != nil {
 			fmt.Print("Error getting cache usage\n\n")
 			fmt.Print(err)
